@@ -1,0 +1,105 @@
+name: Build ANGLE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: angle-windows-x64-static
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Resolve ANGLE revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $url = 'https://chromium.googlesource.com/angle/angle.git'
+          $sha = (git ls-remote --exit-code $url refs/heads/main) -split '\s+' |
+              Select-Object -First 1
+          if ($sha -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid ANGLE SHA: $sha" }
+          $tag = "angle-$($sha.Substring(0, 12))"
+          $skip = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'schedule') {
+              $response = Invoke-WebRequest -SkipHttpErrorCheck `
+                  -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" `
+                  -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+              switch ([int]$response.StatusCode) {
+                  200 { $skip = 'true'; Write-Host "Release $tag already exists." }
+                  404 { Write-Host "No release for $tag." }
+                  default { throw "Release lookup returned HTTP $($response.StatusCode)." }
+              }
+          }
+          "sha=$sha", "tag=$tag", "skip=$skip" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        if: steps.revision.outputs.skip == 'false'
+        with:
+          persist-credentials: false
+
+      - name: Build and package static libraries
+        if: steps.revision.outputs.skip == 'false'
+        env:
+          ANGLE_SHA: ${{ steps.revision.outputs.sha }}
+        run: ./scripts/build-angle.ps1 -Revision $env:ANGLE_SHA
+
+      - name: Smoke test the extracted package with MSVC
+        if: steps.revision.outputs.skip == 'false'
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          cmake -S tests -B smoke-build -G 'Visual Studio 17 2022' -A x64
+          cmake --build smoke-build --config Release
+          ctest --test-dir smoke-build -C Release --output-on-failure --no-tests=error
+
+      - uses: actions/upload-artifact@v4
+        if: steps.revision.outputs.skip == 'false'
+        with:
+          name: angle-windows-x64-static
+          path: dist/angle-windows-x64-static.zip
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish tested package
+        if: steps.revision.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ANGLE_SHA: ${{ steps.revision.outputs.sha }}
+          ANGLE_TAG: ${{ steps.revision.outputs.tag }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tag = $env:ANGLE_TAG
+          $title = "ANGLE $tag (Windows x64 Static /MD)"
+          $notes = @"
+          [ANGLE commit](https://chromium.googlesource.com/angle/angle/+/$env:ANGLE_SHA)
+
+          Windows x64 Release static libraries. Dynamic MSVC CRT (/MD), Vulkan and ThinLTO disabled.
+          Defines: ANGLE_STATIC=1 ANGLE_EXPORT= EGLAPI= GL_APICALL= GL_API=
+          See BUILD_INFO.txt for Windows link libraries.
+          "@
+          $assets = @('dist/angle-windows-x64-static.zip', 'dist/angle-windows-x64-static.zip.sha256')
+          $response = Invoke-WebRequest -SkipHttpErrorCheck `
+              -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" `
+              -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json' }
+          switch ([int]$response.StatusCode) {
+              200 {
+                  gh release upload $tag @assets --clobber
+                  gh release edit $tag --title $title --notes $notes --draft=false
+              }
+              404 {
+                  gh release create $tag @assets --target $env:GITHUB_SHA --title $title --notes $notes
+              }
+              default { throw "Release lookup returned HTTP $($response.StatusCode)." }
+          }

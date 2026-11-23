@@ -1,0 +1,44 @@
+diff --git a/config/win/BUILD.gn b/config/win/BUILD.gn
+--- a/config/win/BUILD.gn
++++ b/config/win/BUILD.gn
+@@ -81,6 +81,11 @@
+   # for precompiled headers where the same source file is compiled in both
+   # modes.
+   cflags_c = [ "/TC" ]
++
++  if (!use_custom_libcxx) {
++    # Perfetto uses the C++20 shared_ptr atomic free functions.
++    defines = [ "_SILENCE_CXX20_OLD_SHARED_PTR_ATOMIC_SUPPORT_DEPRECATION_WARNING" ]
++  }
+
+   if (is_clang) {
+     # Required to make the 19041 SDK compatible with clang-cl.
+@@ -305,7 +305,7 @@
+ # manually override this config for their compiles.
+ config("winver") {
+   defines = [
+-    "NTDDI_VERSION=NTDDI_WIN11_BR",
++    "NTDDI_VERSION=0x0A000000",
+
+     # We can't say `=_WIN32_WINNT_WIN10` here because some files do
+     # `#if WINVER < 0x0600` without including windows.h before,
+@@ -502,7 +502,7 @@
+       configs = [ ":dynamic_crt" ]
+     } else {
+-      # Desktop Windows: static CRT.
+-      configs = [ ":static_crt" ]
++      # Match the dynamic CRT used by Windows consumers of static ANGLE.
++      configs = [ ":dynamic_crt" ]
+     }
+   }
+ }
+diff --git a/config/compiler/BUILD.gn b/config/compiler/BUILD.gn
+--- a/config/compiler/BUILD.gn
++++ b/config/compiler/BUILD.gn
+@@ -2224,6 +2224,4 @@
+       "-S",
+     ]
+-  } else if (is_win && use_lld) {
+-    arflags = [ "/llvmlibthin" ]
+   }
+ }

@@ -1,0 +1,31 @@
+diff --git a/toolchain/win/setup_toolchain.py b/toolchain/win/setup_toolchain.py
+--- a/toolchain/win/setup_toolchain.py
++++ b/toolchain/win/setup_toolchain.py
+@@ -200,4 +200,4 @@
+         # packaged toolchain in build/vs_toolchain.py.
+-        args.append(SDK_VERSION)
++        args.append(os.environ.get('ANGLE_WINDOWS_SDK_VERSION', SDK_VERSION))
+         variables = _LoadEnvFromBat(args)
+     return _ExtractImportantEnvironment(variables)
+diff --git a/vs_toolchain.py b/vs_toolchain.py
+--- a/vs_toolchain.py
++++ b/vs_toolchain.py
+@@ -459,4 +459,6 @@ def _CopyDebugger(target_dir, target_cpu):
+     """
++    if os.environ.get('ANGLE_WINDOWS_SDK_VERSION'):
++        return
+     win_sdk_dir = SetEnvironmentAndGetSDKDir()
+     if not win_sdk_dir:
+         return
+diff --git a/config/win/visual_studio_version.gni b/config/win/visual_studio_version.gni
+--- a/config/win/visual_studio_version.gni
++++ b/config/win/visual_studio_version.gni
+@@ -40,7 +40,7 @@
+          "You must set the windows_sdk_version if you set the path")
+   assert(wdk_path != "",
+          "You must set the wdk_path if you set the visual studio path")
+-  visual_studio_runtime_dirs = []
++  visual_studio_runtime_dirs = "None"
+ }
+
+ visual_studio_version_logs = [ "windows_sdk_version=${windows_sdk_version}" ]

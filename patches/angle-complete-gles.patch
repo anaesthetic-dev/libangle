@@ -1,0 +1,9 @@
+diff --git a/BUILD.gn b/BUILD.gn
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -1479,4 +1479,5 @@
+ angle_static_library("libGLESv2_static") {
++  complete_static_lib = true
+   sources = libglesv2_sources
+   public_deps = [ ":libGLESv2_thin_static" ]
+ }
